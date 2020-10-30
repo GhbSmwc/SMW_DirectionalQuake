@@ -1,0 +1,1 @@
+Many of the images here are not used on the readme, they exist in case for future editing.

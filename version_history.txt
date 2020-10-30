@@ -1,0 +1,14 @@
+3/30/2016 - 1.0
+ -First release
+
+12/30/2018 - 2.0
+ -Fix incompatibility issues with Lunar Magic version 3.00.
+ --The game crashing at code $00A2A9 (this is the displacement handling routine).
+ --Suboffscreen routines was edited by LM to accommodate the taller horizontal levels, so this patch
+   had to modify that to use $1464 instead of $1C.
+ -Fix issues relating to things using the displaced screen position instead of the original position:
+ --Code $00E9A1 (which is how mario is prevented from going off-screen and kills him when far enough)
+   the screen solid barrier is unaffected by the displacement, but the kill zone is affected.
+ --Code $00F5A5 (the "bottomless pit" that teleport or kills the player) has been fixed.
+ --All SMW sprites types spawning and despawning now uses the undisplaced screen.
+ --Code $2A7FC (labeled "LoadSprFromLevel:") is now fixed.

@@ -1,0 +1,227 @@
+<html>
+	<head>
+		<style>
+			html {
+			background-color: #000207;
+			color: white;
+			font-family: sans-serif;
+			}
+			
+			table, th, td {
+			border: 1px solid white;
+			border-collapse: collapse;
+			}
+		</style>
+	</head>
+<body>
+
+<center><h1>Directional Quake<br></h1>
+By <a href="https://www.smwcentral.net/?p=profile&id=18802">GreenHammerBro</a></center><br><br>
+
+Not much to say on how to insert the patch itself (I mean, just use asar to patch it and done), but if you are planning to have custom sprites, extended and other codes
+that handle screen coordinates (often to erase the sprite), they might use $1A-$1B (Layer 1/screen X position) and $1C-$1D, which that are affected by the screen shake.
+This means say if your screen gets displaced 2 pixels rightwards and there are sprites using the displaced coordinates positioned to the very left edge &lt; 2 pixels away,
+that sprite will get erased, despite the original coordinates isn't far enough to the right.<br><br>
+
+The screen coordinates works like this that most 2D graphics use, they are rightwards and downwards, the SNES is no exception:<br>
+<center><img src="readme_files/SnesScreenPosition.png"></center><br>
+When the screen shakes, it does this (note that this does it in table-order (not randomly) and slowed down for easy viewing),
+the red border is the visible screen that shakes ($1A and $1C), while the black border represents the original position
+(which most sprites and mario should only interact with):<br>
+<center><img src="readme_files/GifFrames/ScreenDisplacement.gif"></center><br>
+Actual (note that gifs cannot have true random ordered frames):<br>
+<center><img src="readme_files/GifFrames/ActualScreenShaking.gif"></center><br>
+
+Now how do you make sure custom sprites (and others) don't react to the shooked screen coordinates? Well, this patch includes a define
+<nobr><tt>!Setting_DirQuake_DebugMode</tt></nobr>, <nobr><tt>!Debug_XDisplace</tt></nobr> and <nobr><tt>!Debug_YDisplace</tt></nobr>,
+that makes it easier to find out if they get erased or spawned by the border upon setting their &ldquo;slot used&rdquo; RAM address ($14C8, $17F0, $1892, etc.).
+Almost all types of sprites that spawn onto the current screen boundary are handled at $02A7FC (labeled &ldquo;<tt>LoadSprFromLevel</tt>&rdquo; on smwdisc) which is already
+hijacked by this patch, and so does all the routines that delete sprites when too far off-screen. However, routines like the ones from pixi may still use $1A and $1C, which
+can easily be fixed by replacing it with $1462 and $1464. Remember that they each are 2 bytes long.
+<hr>
+<h2>Replacing codes</h2>
+Before we begin, if you are handling SA-1 hybrids, just remember that the defines could be different. Pixi, at the time of writing (due to potential updates), uses this:
+(it is in an ASM file at <tt>pixi_v1.2.3\asm\sa1def.asm</tt>), please note that asar is case sensitive with defines and labels.
+<table><td><pre>if read1($00FFD5) == $23		; check if the rom is sa-1
+	sa1rom
+	!SA1 = 1
+	!SA_1 = 1
+	!Base1 = $3000
+	!Base2 = $6000
+	
+	!BankA = $400000
+	!BankB = $000000
+	
+	!SprSize = $16
+else
+	lorom
+	!SA1 = 0
+	!SA_1 = 0
+	!Base1 = $0000
+	!Base2 = $0000
+	
+	!BankA = $7E0000
+	!BankB = $800000
+	
+	!SprSize = $0C
+endif</pre></td></table><br><br>
+
+While many patches uses this:
+<table><td><pre>	!dp = $0000
+	!addr = $0000
+	!sa1 = 0
+	!gsu = 0
+
+if read1($00FFD6) == $15
+	sfxrom
+	!dp = $6000
+	!addr = !dp
+	!gsu = 1
+elseif read1($00FFD5) == $23
+	sa1rom
+	!dp = $3000
+	!addr = $6000
+	!sa1 = 1
+endif</pre></td></table><br><br>
+
+So to note, use the following defines (use &ldquo;|&rdquo; (bitwise OR) after the address and before the defines (eg. $1234|!addr)):
+
+<table>
+<tr>
+<th>When a RAM address is:</th>
+<th>Use this define for most patches</th>
+<th>Use this define for some tools (pixi)</th>
+</tr>
+<tr>
+<td><tt>$xx</tt> (1 byte RAM address).</td>
+<td colspan="2"><center>No need to convert.</center></td>
+</tr>
+<tr>
+<td><tt>$00xx</tt> (2 bytes RAM address; high byte is zero (often needed for Y-indexing)).</td>
+<td><tt>!dp</tt></td>
+<td><tt>!Base1</tt></td>
+</tr>
+<tr>
+<td><tt>$xxxx</tt> (2 bytes RAM address; at least address $0100).</td>
+<td><tt>!addr</tt></td>
+<td><tt>!Base2</tt></td>
+</tr>
+</table><br>
+So $1A and $1B does not need anything appended at all. But when using a non-displaced coordinates, say <nobr><tt>LDA $1462</tt></nobr>, you stick <tt>|!addr</tt> (for most patches)
+or <tt>|!Base2</tt> (Pixi) at the end: <nobr><tt>LDA $1462|!addr</tt></nobr> or <nobr><tt>LDA $1462|!Base2</tt></nobr>.
+
+Here is an example edit of Pixi's <tt>routines/SubOffScreen.asm</tt>:
+<table>
+<tr><th>Original</th>
+<th>Use original screen position (change/replace it to this!)</th><tr>
+<tr><td><pre>LDA $1A                 ;A:8A01 X:0009 Y:0001 D:0000 DB:01 S:01F1 P:envMXdizcHC:0858 VC:176 00 FL:205
+CLC                     
+ADC .spr_t14,y          
+ROL $00                 
+CMP !E4,x               
+PHP                     
+LDA $1B                 
+<td>
+<pre>LDA $1462|!Base2        ;A:8A01 X:0009 Y:0001 D:0000 DB:01 S:01F1 P:envMXdizcHC:0858 VC:176 00 FL:205
+CLC                     ;A:8A00 X:0009 Y:0001 D:0000 DB:01 S:01F1 P:envMXdiZcHC:0882 VC:176 00 FL:205
+ADC .spr_t14,y          ;A:8A00 X:0009 Y:0001 D:0000 DB:01 S:01F1 P:envMXdiZcHC:0896 VC:176 00 FL:205
+ROL $00                 ;A:8AC0 X:0009 Y:0001 D:0000 DB:01 S:01F1 P:eNvMXdizcHC:0928 VC:176 00 FL:205
+CMP !E4,x               ;A:8AC0 X:0009 Y:0001 D:0000 DB:01 S:01F1 P:eNvMXdizCHC:0966 VC:176 00 FL:205
+PHP                     ;A:8AC0 X:0009 Y:0001 D:0000 DB:01 S:01F1 P:envMXdizCHC:0996 VC:176 00 FL:205
+LDA $1463|!Base2        ;A:8AC0 X:0009 Y:0001 D:0000 DB:01 S:01F0 P:envMXdizCHC:1018 VC:176 00 FL:205</pre></td>
+</tr>
+<tr>
+<td><pre>LDA $1C                 ;A:001A X:0009 Y:0001 D:0000 DB:01 S:01F3 P:eNvMXdizcHC:0052 VC:251 00 FL:5379
+CLC                     ;A:00BD X:0009 Y:0001 D:0000 DB:01 S:01F3 P:eNvMXdizcHC:0076 VC:251 00 FL:5379
+ADC .spr_t12,y          ;A:00BD X:0009 Y:0001 D:0000 DB:01 S:01F3 P:eNvMXdizcHC:0090 VC:251 00 FL:5379
+ROL $00                 ;A:006D X:0009 Y:0001 D:0000 DB:01 S:01F3 P:enVMXdizCHC:0122 VC:251 00 FL:5379
+CMP !D8,x               ;A:006D X:0009 Y:0001 D:0000 DB:01 S:01F3 P:eNVMXdizcHC:0160 VC:251 00 FL:5379
+PHP                     ;A:006D X:0009 Y:0001 D:0000 DB:01 S:01F3 P:eNVMXdizcHC:0190 VC:251 00 FL:5379
+LDA $1D			;A:006D X:0009 Y:0001 D:0000 DB:01 S:01F2 P:eNVMXdizcHC:0212 VC:251 00 FL:5379</pre></td>
+<td><pre>LDA $1464|!Base2        ;A:001A X:0009 Y:0001 D:0000 DB:01 S:01F3 P:eNvMXdizcHC:0052 VC:251 00 FL:5379
+CLC                     ;A:00BD X:0009 Y:0001 D:0000 DB:01 S:01F3 P:eNvMXdizcHC:0076 VC:251 00 FL:5379
+ADC .spr_t12,y          ;A:00BD X:0009 Y:0001 D:0000 DB:01 S:01F3 P:eNvMXdizcHC:0090 VC:251 00 FL:5379
+ROL $00                 ;A:006D X:0009 Y:0001 D:0000 DB:01 S:01F3 P:enVMXdizCHC:0122 VC:251 00 FL:5379
+CMP !D8,x               ;A:006D X:0009 Y:0001 D:0000 DB:01 S:01F3 P:eNVMXdizcHC:0160 VC:251 00 FL:5379
+PHP                     ;A:006D X:0009 Y:0001 D:0000 DB:01 S:01F3 P:eNVMXdizcHC:0190 VC:251 00 FL:5379
+LDA $1465|!Base2	;A:006D X:0009 Y:0001 D:0000 DB:01 S:01F2 P:eNVMXdizcHC:0212 VC:251 00 FL:5379</pre></td>
+</tr>
+</table><br><br>
+
+This might not work for some other codes should the current frame and previous frame screen coordinates be drastically different (such as the code
+at $02AC68 and $02ACA8 to temporally move the current frame screen coordinates before restoring it back to load sprites during level load (sprites that
+would appear in the player current screen not necessarily from the edge of screen when the level fades in)),
+try taking $1A and $1B, subtract by the displacement (the RAM address you have on <nobr><tt>!Freeram_DirQuake_Layer1XDisplacement</tt></nobr> and $1888) and
+take that difference as the non-displaced original position (CTRL+F in patch for &ldquo;<nobr><tt>LoadSprFromLevel_VerticalLevel:</tt></nobr>&rdquo; and
+&ldquo;<nobr><tt>LoadSprFromLevel_HorizontalLevel:</tt></nobr>&rdquo; to see what I mean).
+
+However, if the code reads $1A and $1B <b>after</b> restoring layer 1 back to original position at address $00A2EA-$00A2EE
+(which 4 bytes at $00A2EA is hijacked to restore the horizontal coordinates), then <b>you don't need and <u>should not</u>
+subtract by !Freeram_DirQuake_Layer1XDisplacement and $1888 to restore it when it is already restored</b>, else you end
+up with the boundary that sprites and other things react to a &ldquo;inverted shocked position&rdquo;. This can be shown by
+debugging a &ldquo;read&rdquo; of $1A and $1B at this time and comparing with $1462 and $1464 being the same value despite
+a displacement is still in effect.<br><br>
+
+Another thing to watch out for is the horizontal and vertical offscreen check for normal/custom sprites: address $15A0 and $186C. This is used for OAM screen-wrapping
+prevention, but unfortunately, it was also used to prevent interaction with the player when offscreen ($01A7F0, and yes, this patch modifies that) and ignoring the
+SubOffScreen codes when nonzero. And yes, it is set to a nonzero value based on the displaced screen coordinates instead of the original screen position. Thus this
+patch had no choice but to modify all 3 SubOffScreen to ignore the offscreen flags entirely, so make sure to delete your sprite not to use $15A0 and $186C.
+<hr>
+<h2>Debugging guide</h2>
+This tutorial on how to make sure no sprite reacts to the moved screen when a displacement occurs. What you need is:
+<ul>
+<li><a href="https://www.smwcentral.net/?p=section&a=details&id=18706">SMWDisc</a></li>
+<li><a href="https://github.com/devinacker/bsnes-plus/releases">Bsnes plus</a></li>
+</ul>
+
+<ol>
+<li>In the quake patch, set <nobr><tt>!Setting_DirQuake_DebugMode</tt></nobr> to 1, and patch it to your game.</li>
+<li>Make a test level and place a sprite you're testing with via Lunar Magic.</li>
+<li>Run your game on Bsnes plus and play the level you are testing with.</li>
+<li>On that program, open the &ldquo;Memory Editor&rdquo; by going to  <tt>Tools &rightarrow; Debugger &rightarrow; Tools &rightarrow; Memory Editor</tt>.
+Now do these things:
+<ol>
+<li>Enable &ldquo;Auto Update&rdquo;. If your computer cannot handle that, use the &ldquo;Refresh&rdquo; button to update the values manually (you may have
+keep hitting that button periodically though).</li>
+<li>On the search bar, type <tt>1887</tt>, now try finding that address (bsnes plus at the moment of making this may not highlight (as in, bold the font)
+the number), and set that to any nonzero number.</li>
+</ol>
+</li>
+<li>Now the quake is in debug mode in-game. Hold down SELECT and use the D-pad to test the displacement. As mentioned earlier on, no sprite or anything not related
+to graphics should not use the displaced screen to despawn, kill or otherwise interact with the displaced screen.</li>
+
+<li>Then play around with the screen with the sprite, for example, before even spawning the sprite onto the screen, try displacing the screen to its spawn point. It
+shouldn't spawn until you move the original screen position to it.</li>
+
+<li>Then to test its SubOffScreen code (a routine that impermanently erases sprites), simply displace the screen FAR from the sprite. It shouldn't get erased by this moved
+screen, but rather rely on getting erased on the original screen position. Of course, to tell if the sprite is erased or not is by breakpointing these addresses:
+<table>
+<tr>
+<th>Type of sprite</th>
+<th>Range, (SA-1 range)</th>
+</tr>
+<tr>
+<td>Regular Sprite/Custom Sprite</td>
+<td>$14C8-$14D3 ($3242-$3257)</td>
+</tr>
+<tr>
+<td>Extended sprites</td>
+<td>$170B-$1714 ($770B-$7714)</td>
+</tr>
+</table><br>
+
+The're maybe other things that could react to the screen coordinates, but only a few.</li>
+
+
+
+<li>To find the code using the displaced $1A and $1C (if you find a code reacting to the moved screen):
+<ol>
+<li>Open SMWDisC, and CTRL+F the address that breakpointed the code. If you get an error saying &ldquo;not found&rdquo;, then add the address by 1, hit enter and repeat until it
+finds an adjacent address (e.g. $01ACA1 (fails), $01ACA2 (fails), $01ACA3 (fails), finally $01ACA4 is found. This is due to some addresses are being replaced with labels, like <nobr><tt>CODE_01ACA1:</tt></nobr> replaced
+with <nobr><tt>OffScrKillSprite:</tt></nobr>)</li>
+<li>Now look for a code before (as in, the order the game runs the code, not necessary the address order due to branching) that breakpoint that is checking $1A and $1C (in this
+example, it is address $01AC5C and $01ACD2), if you couldn't, then the code is good to go, as it ignores the displaced screen. If you do find it, then do whats explained
+previously to make it not use the displaced screen. Just remember that OAM drawing routine MUST use the displaced $1A and $1C so that its image shakes else it will follow the
+screen.</li>
+</ol>
+</ol>
