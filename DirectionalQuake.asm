@@ -414,6 +414,15 @@ freecode
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;freespace
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;As a side note, to obtain the sprite's position on-screen ignoring the shaking effect, the formula is this:
+; SpriteScreenPosNotShooked = SpritePos - (ShookedScreenPos - Displacement)
+;Alternatively:
+; SpriteScreenPosNotShooked = SpritePos + (-ShookedScreenPos + Displacement)
+;  which is this:
+;   SpriteScreenPosNotShooked = SpritePos + Displacement - ShookedScreenPos
+;The last one is used in some cases like "DeathPit" ($80 already have "SpritePos + (-ShookedScreenPos)"
+;(remember, community property of addition)), cases where you do not want to modify the screen position
+;value obtain but instead, the sprite position.
 	Layer1XScroll0:					;>JML from $008246
 	LDA $1A						;\Enable horizontal displacement
 	CLC						;|
